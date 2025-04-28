@@ -6,3 +6,9 @@
 *__pycache__
 venv/
 env/
+.venv/
+pylabel/venv/
+pylabel/.venv/lib
+pylabel/env/
+pylabel/.venv
+health_policy_results.csv
