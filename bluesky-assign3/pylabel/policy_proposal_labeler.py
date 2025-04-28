@@ -12,6 +12,9 @@ import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple
 from atproto import Client
 
+import os
+from dotenv import load_dotenv
+
 
 class HealthPolicyLabeler:
     """
@@ -396,9 +399,6 @@ def main():
     """
     Main function to run the policy labeler
     """
-    import os
-    from dotenv import load_dotenv
-    from atproto import Client
 
     # Load environment variables
     load_dotenv(override=True)
