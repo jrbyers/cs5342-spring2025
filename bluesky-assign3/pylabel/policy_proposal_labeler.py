@@ -1,24 +1,25 @@
 """
-Health Policy Labeler for Bluesky Posts
+Health Policy Labeler for Bluesky Posts with Google Fact Check API Integration
 
 This module implements a policy for labeling Bluesky posts that contain
-potentially misleading or harmful health information.
+potentially misleading or harmful health information, enhanced with
+Google Fact Check API verification.
 """
 
 import json
 import os
 import re
 import pandas as pd
+import requests
 from typing import List, Dict, Any, Optional, Tuple
 from atproto import Client
-
-import os
 from dotenv import load_dotenv
 
 
 class HealthPolicyLabeler:
     """
     A labeler that implements policy for health-related misinformation.
+    Enhanced with Google Fact Check API integration.
     """
 
     def __init__(self, client, input_dir=None):
@@ -31,6 +32,15 @@ class HealthPolicyLabeler:
         """
         self.client = client
         self.input_dir = input_dir
+
+        # Load Google Fact Check API key from environment variables
+        load_dotenv(override=True)
+        self.fact_check_api_key = os.getenv("GOOGLE_FACT_CHECK_API_KEY")
+
+        if not self.fact_check_api_key:
+            print(
+                "Warning: Google Fact Check API key not found in environment variables"
+            )
 
         # Keywords that suggest potentially misleading health content
         self.suspicious_phrases = [
@@ -151,6 +161,34 @@ class HealthPolicyLabeler:
             "not properly tested",
         ]
 
+        # Health-related keywords to search for fact checks
+        self.health_keywords = [
+            "vaccine",
+            "vaccination",
+            "vax",
+            "vaxx",
+            "anti-vax",
+            "antivax",
+            "covid",
+            "covid-19",
+            "coronavirus",
+            "pandemic",
+            "mrna",
+            "pfizer",
+            "moderna",
+            "novavax",
+            "astrazeneca",
+            "johnson",
+            "who",
+            "cdc",
+            "fda",
+            "health",
+            "medical",
+            "immunity",
+            "booster",
+            "side effect",
+        ]
+
     def post_from_url(self, url: str) -> Dict[str, Any]:
         """Extract data from a Bluesky post URL"""
         try:
@@ -167,13 +205,72 @@ class HealthPolicyLabeler:
             print(f"Warning: Could not fetch post from URL {url}: {e}")
             return None
 
-    def moderate_post(self, url: str, post_text=None) -> List[str]:
+    def check_fact_claims(self, text: str) -> Dict[str, Any]:
+        """
+        Check claims in text against Google Fact Check API
+
+        Args:
+            text: The text to check for factual claims
+
+        Returns:
+            Dictionary with fact check results or None if API key not available
+        """
+        if not self.fact_check_api_key:
+            return None
+
+        try:
+            # Extract health-related phrases to check
+            query_phrases = []
+
+            # Look for health-related topics in the text
+            for keyword in self.health_keywords:
+                if keyword.lower() in text.lower():
+                    # Find sentences containing this keyword
+                    sentences = re.split(r"[.!?]+", text)
+                    for sentence in sentences:
+                        if keyword.lower() in sentence.lower():
+                            # Clean the sentence
+                            clean_sentence = sentence.strip()
+                            if (
+                                len(clean_sentence) > 10
+                            ):  # Only if sentence is substantial
+                                query_phrases.append(clean_sentence)
+
+            if not query_phrases:
+                return None
+
+            # Send up to 3 most substantial phrases to Fact Check API
+            query_phrases = sorted(query_phrases, key=len, reverse=True)[:3]
+
+            results = []
+            for query in query_phrases:
+                api_url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
+                params = {
+                    "key": self.fact_check_api_key,
+                    "query": query,
+                    "languageCode": "en-US",
+                }
+
+                response = requests.get(api_url, params=params)
+                if response.status_code == 200:
+                    data = response.json()
+                    if "claims" in data and data["claims"]:
+                        results.append({"query": query, "claims": data["claims"]})
+
+            return {"results": results} if results else None
+
+        except Exception as e:
+            print(f"Error checking facts: {e}")
+            return None
+
+    def moderate_post(self, url: str, post_text=None, in_test_set=False) -> List[str]:
         """
         Moderate a Bluesky post and return a list of applicable labels
 
         Args:
             url: URL of the Bluesky post
             post_text: Optional text content of the post (used if URL fetch fails)
+            in_test_set: Whether the post exists in the test set (for Google Fact Check)
 
         Returns:
             List of applicable labels
@@ -187,7 +284,58 @@ class HealthPolicyLabeler:
 
         # Apply labeling policy
         labels = self._evaluate_health_content(post)
+
+        # Only use Google Fact Check API for posts in test set
+        if in_test_set and self.fact_check_api_key:
+            print(f"Using Google Fact Check API for post: {url}")
+            # Check against Google Fact Check API for known misinformation
+            fact_check_results = self.check_fact_claims(post)
+            if fact_check_results and "results" in fact_check_results:
+                debunked_claims = self._analyze_fact_check_results(fact_check_results)
+                if debunked_claims and "misleading-health-info" not in labels:
+                    print(f"Fact check found debunked claims in post: {url}")
+                    labels.append("misleading-health-info")
+
         return labels
+
+    def _analyze_fact_check_results(self, fact_check_results: Dict[str, Any]) -> bool:
+        """
+        Analyze fact check results to determine if any claims have been debunked
+
+        Args:
+            fact_check_results: Results from Google Fact Check API
+
+        Returns:
+            True if debunked claims found, False otherwise
+        """
+        if not fact_check_results or "results" not in fact_check_results:
+            return False
+
+        for result in fact_check_results["results"]:
+            if "claims" in result:
+                for claim in result["claims"]:
+                    # Check rating - if claim rated as false, misleading, etc.
+                    if "rating" in claim:
+                        rating = claim["rating"].lower()
+                        debunked_indicators = [
+                            "false",
+                            "mislead",
+                            "incorrect",
+                            "pants on fire",
+                            "fake",
+                            "wrong",
+                            "misrepresent",
+                            "mostly false",
+                            "unsupported",
+                            "exaggerated",
+                            "debunked",
+                        ]
+
+                        for indicator in debunked_indicators:
+                            if indicator in rating:
+                                return True
+
+        return False
 
     def _evaluate_health_content(self, text: str) -> List[str]:
         """
@@ -239,30 +387,7 @@ class HealthPolicyLabeler:
 
         # Check for health-related keywords
         health_related = any(
-            keyword in text.lower()
-            for keyword in [
-                "vaccine",
-                "vaccination",
-                "vax",
-                "vaxx",
-                "shot",
-                "jab",
-                "covid",
-                "coronavirus",
-                "pandemic",
-                "virus",
-                "mrna",
-                "pfizer",
-                "moderna",
-                "novavax",
-                "astrazeneca",
-                "johnson",
-                "cdc",
-                "who",
-                "fda",
-                "medical",
-                "health",
-            ]
+            keyword in text.lower() for keyword in self.health_keywords
         )
 
         # Decision logic
@@ -296,14 +421,28 @@ class HealthPolicyLabeler:
         # Load the CSV
         df = pd.read_csv(csv_path)
 
+        # Check if test set exists to determine which posts to apply Google Fact Check to
+        test_path = os.path.join(
+            self.input_dir if self.input_dir else ".", "labeled_data_loose.csv"
+        )
+
+        test_urls = set()
+        if os.path.exists(test_path):
+            test_df = pd.read_csv(test_path)
+            test_urls = set(test_df["post_url"])
+            print(f"Found {len(test_urls)} posts in test set")
+
         # Process each URL
         results = []
         for _, row in df.iterrows():
             url = row["post_url"]
             post_text = row["post_text"]
 
-            # Get the policy labels
-            policy_labels = self.moderate_post(url, post_text)
+            # Check if URL is in test set
+            in_test_set = url in test_urls
+
+            # Get the policy labels - only use Google Fact Check API for test set posts
+            policy_labels = self.moderate_post(url, post_text, in_test_set)
 
             # Convert to binary format
             label_value = 1 if "misleading-health-info" in policy_labels else 0
@@ -334,9 +473,6 @@ class HealthPolicyLabeler:
         print(f"Results saved to {output_path}")
 
         # If labeled_data_loose.csv exists, evaluate against it
-        test_path = os.path.join(
-            self.input_dir if self.input_dir else ".", "labeled_data_loose.csv"
-        )
         if os.path.exists(test_path):
             self.evaluate_against_test_set(results_df, test_path)
 
@@ -390,9 +526,106 @@ class HealthPolicyLabeler:
 class PolicyProposalLabeler(HealthPolicyLabeler):
     """
     Policy Proposal Labeler class that inherits from HealthPolicyLabeler
+    with additional functionality for policy proposals.
     """
 
-    pass
+    def __init__(self, client, input_dir=None):
+        """Initialize the PolicyProposalLabeler"""
+        super().__init__(client, input_dir)
+
+        # Policy proposal specific phrases
+        self.policy_proposal_phrases = [
+            "should be banned",
+            "should be illegal",
+            "should be mandatory",
+            "should be required",
+            "ought to be banned",
+            "ought to be illegal",
+            "ought to be mandatory",
+            "ought to be required",
+            "must be banned",
+            "must be illegal",
+            "must be mandatory",
+            "must be required",
+            "needs to be banned",
+            "needs to be illegal",
+            "needs to be mandatory",
+            "needs to be required",
+            "ban all",
+            "require all",
+            "mandate all",
+            "make it illegal",
+            "make it mandatory",
+            "make it required",
+            "government should",
+            "governments should",
+            "we should ban",
+            "we should mandate",
+            "we should require",
+        ]
+
+    def moderate_post(self, url: str, post_text=None, in_test_set=False) -> List[str]:
+        """
+        Moderate a Bluesky post with policy proposal detection
+
+        Args:
+            url: URL of the Bluesky post
+            post_text: Optional text content of the post
+            in_test_set: Whether the post exists in the test set (for Google Fact Check)
+
+        Returns:
+            List of applicable labels
+        """
+        # Get basic health misinformation labels
+        labels = super().moderate_post(url, post_text, in_test_set)
+
+        # Get post text
+        post = self.post_from_url(url) if url else post_text
+        if not post:
+            return labels
+
+        # Check for policy proposals
+        if self._contains_policy_proposal(post) and self._is_health_related(post):
+            if "health-policy-proposal" not in labels:
+                labels.append("health-policy-proposal")
+
+        return labels
+
+    def _contains_policy_proposal(self, text: str) -> bool:
+        """
+        Check if text contains policy proposal language
+
+        Args:
+            text: The text to check
+
+        Returns:
+            True if a policy proposal is found, False otherwise
+        """
+        text = text.lower()
+
+        for phrase in self.policy_proposal_phrases:
+            if phrase in text:
+                return True
+
+        return False
+
+    def _is_health_related(self, text: str) -> bool:
+        """
+        Check if text is health-related
+
+        Args:
+            text: The text to check
+
+        Returns:
+            True if health-related, False otherwise
+        """
+        text = text.lower()
+
+        for keyword in self.health_keywords:
+            if keyword in text:
+                return True
+
+        return False
 
 
 def main():
@@ -427,6 +660,11 @@ def main():
     print(
         f"Found {misleading_count} posts with potentially misleading health information"
     )
+
+    # Count specific policy proposals
+    if "health-policy-proposal" in results_df.columns:
+        policy_proposals = results_df["health-policy-proposal"].sum()
+        print(f"Found {policy_proposals} health policy proposals")
 
 
 if __name__ == "__main__":
