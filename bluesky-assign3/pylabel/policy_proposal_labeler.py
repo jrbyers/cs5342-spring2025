@@ -14,6 +14,7 @@ import requests
 from typing import List, Dict, Any, Optional, Tuple
 from atproto import Client
 from dotenv import load_dotenv
+from groq import Groq
 
 
 class HealthPolicyLabeler:
@@ -205,7 +206,7 @@ class HealthPolicyLabeler:
             print(f"Warning: Could not fetch post from URL {url}: {e}")
             return None
 
-    def check_fact_claims(self, text: str) -> Dict[str, Any]:
+    def check_fact_claims(self, text: str) -> bool:
         """
         Check claims in text against Google Fact Check API
 
@@ -215,53 +216,71 @@ class HealthPolicyLabeler:
         Returns:
             Dictionary with fact check results or None if API key not available
         """
-        if not self.fact_check_api_key:
-            return None
+        client = Groq()
 
-        try:
-            # Extract health-related phrases to check
-            query_phrases = []
+        chat_completion = client.chat.completions.create(
+            #
+            # Required parameters
+            #
+            messages=[
+                # Set an optional system message. This sets the behavior of the
+                # assistant and can be used to provide specific instructions for
+                # how it should behave throughout the conversation.
+                {
+                    "role": "system",
+                    "content": "you are a content moderator that derives claims from bluesky posts and returns a single sentence detailing the claim",
+                },
+                # Set a user message for the assistant to respond to.
+                {
+                    "role": "user",
+                    "content": text,
+                },
+            ],
+            # The language model which will generate the completion.
+            model="llama-3.3-70b-versatile",
+            #
+            # Optional parameters
+            #
+            # Controls randomness: lowering results in less random completions.
+            # As the temperature approaches zero, the model will become deterministic
+            # and repetitive.
+            temperature=0.5,
+            # The maximum number of tokens to generate. Requests can use up to
+            # 32,768 tokens shared between prompt and completion.
+            max_completion_tokens=1024,
+            # Controls diversity via nucleus sampling: 0.5 means half of all
+            # likelihood-weighted options are considered.
+            top_p=1,
+            # A stop sequence is a predefined or user-specified text string that
+            # signals an AI to stop generating content, ensuring its responses
+            # remain focused and concise. Examples include punctuation marks and
+            # markers like "[end]".
+            stop=None,
+            # If set, partial message deltas will be sent.
+            stream=False,
+        )
 
-            # Look for health-related topics in the text
-            for keyword in self.health_keywords:
-                if keyword.lower() in text.lower():
-                    # Find sentences containing this keyword
-                    sentences = re.split(r"[.!?]+", text)
-                    for sentence in sentences:
-                        if keyword.lower() in sentence.lower():
-                            # Clean the sentence
-                            clean_sentence = sentence.strip()
-                            if (
-                                len(clean_sentence) > 10
-                            ):  # Only if sentence is substantial
-                                query_phrases.append(clean_sentence)
+        claim = chat_completion.choices[0].message.content
 
-            if not query_phrases:
-                return None
+        params = {
+            "query": claim,
+            "languageCode": "en-US",
+            "key": self.fact_check_api_key,
+        }
 
-            # Send up to 3 most substantial phrases to Fact Check API
-            query_phrases = sorted(query_phrases, key=len, reverse=True)[:3]
+        response = requests.get(
+            "https://factchecktools.googleapis.com/v1alpha1/claims:search",
+            params=params,
+        )
+        data = response.json()
 
-            results = []
-            for query in query_phrases:
-                api_url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
-                params = {
-                    "key": self.fact_check_api_key,
-                    "query": query,
-                    "languageCode": "en-US",
-                }
+        if data:
+            # Get the textual rating from the first claim review
+            textual_rating = data["claims"][0]["claimReview"][0]["textualRating"]
 
-                response = requests.get(api_url, params=params)
-                if response.status_code == 200:
-                    data = response.json()
-                    if "claims" in data and data["claims"]:
-                        results.append({"query": query, "claims": data["claims"]})
-
-            return {"results": results} if results else None
-
-        except Exception as e:
-            print(f"Error checking facts: {e}")
-            return None
+            return textual_rating, claim
+        else:
+            return None, claim
 
     def moderate_post(self, url: str, post_text=None, in_test_set=False) -> List[str]:
         """
@@ -289,53 +308,60 @@ class HealthPolicyLabeler:
         if in_test_set and self.fact_check_api_key:
             print(f"Using Google Fact Check API for post: {url}")
             # Check against Google Fact Check API for known misinformation
-            fact_check_results = self.check_fact_claims(post)
-            if fact_check_results and "results" in fact_check_results:
-                debunked_claims = self._analyze_fact_check_results(fact_check_results)
-                if debunked_claims and "misleading-health-info" not in labels:
+            fact_check_results, claim = self.check_fact_claims(post)
+            if fact_check_results:
+                print(fact_check_results)
+                if fact_check_results.lower() == "false":
                     print(f"Fact check found debunked claims in post: {url}")
                     labels.append("misleading-health-info")
+        else:
+            client = Groq()
 
-        return labels
+            chat_completion = client.chat.completions.create(
+                #
+                # Required parameters
+                #
+                messages=[
+                    # Set an optional system message. This sets the behavior of the
+                    # assistant and can be used to provide specific instructions for
+                    # how it should behave throughout the conversation.
+                    {
+                        "role": "system",
+                        "content": "you are a content moderator that derives claims from bluesky posts and returns a single sentence detailing the claim",
+                    },
+                    # Set a user message for the assistant to respond to.
+                    {
+                        "role": "user",
+                        "content": post,
+                    },
+                ],
+                # The language model which will generate the completion.
+                model="llama-3.3-70b-versatile",
+                #
+                # Optional parameters
+                #
+                # Controls randomness: lowering results in less random completions.
+                # As the temperature approaches zero, the model will become deterministic
+                # and repetitive.
+                temperature=0.5,
+                # The maximum number of tokens to generate. Requests can use up to
+                # 32,768 tokens shared between prompt and completion.
+                max_completion_tokens=1024,
+                # Controls diversity via nucleus sampling: 0.5 means half of all
+                # likelihood-weighted options are considered.
+                top_p=1,
+                # A stop sequence is a predefined or user-specified text string that
+                # signals an AI to stop generating content, ensuring its responses
+                # remain focused and concise. Examples include punctuation marks and
+                # markers like "[end]".
+                stop=None,
+                # If set, partial message deltas will be sent.
+                stream=False,
+            )
 
-    def _analyze_fact_check_results(self, fact_check_results: Dict[str, Any]) -> bool:
-        """
-        Analyze fact check results to determine if any claims have been debunked
+            claim = chat_completion.choices[0].message.content
 
-        Args:
-            fact_check_results: Results from Google Fact Check API
-
-        Returns:
-            True if debunked claims found, False otherwise
-        """
-        if not fact_check_results or "results" not in fact_check_results:
-            return False
-
-        for result in fact_check_results["results"]:
-            if "claims" in result:
-                for claim in result["claims"]:
-                    # Check rating - if claim rated as false, misleading, etc.
-                    if "rating" in claim:
-                        rating = claim["rating"].lower()
-                        debunked_indicators = [
-                            "false",
-                            "mislead",
-                            "incorrect",
-                            "pants on fire",
-                            "fake",
-                            "wrong",
-                            "misrepresent",
-                            "mostly false",
-                            "unsupported",
-                            "exaggerated",
-                            "debunked",
-                        ]
-
-                        for indicator in debunked_indicators:
-                            if indicator in rating:
-                                return True
-
-        return False
+        return labels, claim
 
     def _evaluate_health_content(self, text: str) -> List[str]:
         """
@@ -411,7 +437,8 @@ class HealthPolicyLabeler:
             DataFrame with the results
         """
         # Load the health URLs CSV
-        csv_path = os.path.join(self.input_dir, "bluesky_health_urls.csv")
+        # csv_path = os.path.join(self.input_dir, "bluesky_health_urls.csv")
+        csv_path = os.path.join(self.input_dir, "subset.csv")
         if not os.path.exists(csv_path):
             print(f"Could not find bluesky_health_urls.csv in {self.input_dir}")
             csv_path = "bluesky_health_urls.csv"  # Try the current directory
@@ -442,7 +469,9 @@ class HealthPolicyLabeler:
             in_test_set = url in test_urls
 
             # Get the policy labels - only use Google Fact Check API for test set posts
-            policy_labels = self.moderate_post(url, post_text, in_test_set)
+            policy_labels, extracted_claim = self.moderate_post(
+                url, post_text, in_test_set
+            )
 
             # Convert to binary format
             label_value = 1 if "misleading-health-info" in policy_labels else 0
@@ -457,6 +486,7 @@ class HealthPolicyLabeler:
                     "domain": row.get("domain", ""),
                     "keywords_matched": row.get("keywords_matched", ""),
                     "post_text": post_text,
+                    "extracted_claim": extracted_claim,  # Add the extracted claim
                     "label": label_value,
                 }
             )
