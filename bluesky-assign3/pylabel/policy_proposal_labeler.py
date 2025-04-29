@@ -311,7 +311,7 @@ class HealthPolicyLabeler:
             fact_check_results, claim = self.check_fact_claims(post)
             if fact_check_results:
                 print(fact_check_results)
-                if fact_check_results.lower() == "false":
+                if fact_check_results.lower() != "true":
                     print(f"Fact check found debunked claims in post: {url}")
                     labels.append("misleading-health-info")
         else:
@@ -437,8 +437,8 @@ class HealthPolicyLabeler:
             DataFrame with the results
         """
         # Load the health URLs CSV
-        # csv_path = os.path.join(self.input_dir, "bluesky_health_urls.csv")
-        csv_path = os.path.join(self.input_dir, "subset.csv")
+        csv_path = os.path.join(self.input_dir, "bluesky_health_urls.csv")
+        # csv_path = os.path.join(self.input_dir, "subset.csv")
         if not os.path.exists(csv_path):
             print(f"Could not find bluesky_health_urls.csv in {self.input_dir}")
             csv_path = "bluesky_health_urls.csv"  # Try the current directory
@@ -464,6 +464,9 @@ class HealthPolicyLabeler:
         for _, row in df.iterrows():
             url = row["post_url"]
             post_text = row["post_text"]
+
+            if not url or not post_text:
+                continue
 
             # Check if URL is in test set
             in_test_set = url in test_urls
@@ -618,8 +621,9 @@ class PolicyProposalLabeler(HealthPolicyLabeler):
         if self._contains_policy_proposal(post) and self._is_health_related(post):
             if "health-policy-proposal" not in labels:
                 labels.append("health-policy-proposal")
+        extracted_claim = None
 
-        return labels
+        return labels, extracted_claim
 
     def _contains_policy_proposal(self, text: str) -> bool:
         """

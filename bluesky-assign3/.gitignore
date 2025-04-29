@@ -10,5 +10,4 @@ env/
 pylabel/venv/
 pylabel/.venv/lib
 pylabel/env/
-pylabel/.venv
-health_policy_results.csv
+pylabel/.venv/
