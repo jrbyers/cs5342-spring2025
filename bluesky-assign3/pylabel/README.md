@@ -20,7 +20,7 @@ A Python tool for analyzing Bluesky posts to identify and label potentially misl
 
 ## Ethics Note
 
-This tool is designed for educational purposes and should not be used for commercial or malicious purposes.
+This tool is designed for educational purposes and should not be used for commercial or malicious purposes. It should not be trusted for complete accuracy.
 
 ## Installation
 

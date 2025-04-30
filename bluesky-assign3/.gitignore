@@ -11,3 +11,5 @@ pylabel/venv/
 pylabel/.venv/lib
 pylabel/env/
 pylabel/.venv/
+../.env
+.env
