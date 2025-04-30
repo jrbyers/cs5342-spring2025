@@ -7,7 +7,7 @@ There are too many cross directory dependencies for the code to run just as a co
 
 The slides and video for this project can be found at the following link:
 
-https://cornell.app.box.com/s/olnjhoxi2dhvx6c9ps3gxvdz4964004p
+https://cornell.box.com/s/zohptco4b2n3oua11kmz3k02qfssaud8
 
 # Bluesky Health Policy Labeler
 
