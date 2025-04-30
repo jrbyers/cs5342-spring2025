@@ -24,11 +24,7 @@ This tool is designed for educational purposes and should not be used for commer
 
 ## Installation
 
-1. Clone this repository:
-   ```
-   git clone https://github.com/yourusername/bluesky-health-policy-labeler.git
-   cd bluesky-health-policy-labeler
-   ```
+1. Clone this repository
 
 2. Install required dependencies:
    ```
@@ -78,6 +74,11 @@ The labeler generates the following output file:
 - `policy_labels` - Comma-separated list of policy labels (e.g., "misleading-health-info, health-policy-proposal")
 
 ## Running the Labeler
+
+cd into the appropriate directory:
+```
+cd bluesky-assign3/pylabel
+```
 
 Run the main script:
 ```
