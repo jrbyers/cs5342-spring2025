@@ -1,0 +1,5 @@
+This box link contains our video and slides
+
+https://cornell.app.box.com/s/olnjhoxi2dhvx6c9ps3gxvdz4964004p
+
+Follow the instructions in the README.md to run the code
