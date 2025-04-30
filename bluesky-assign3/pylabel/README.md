@@ -37,10 +37,10 @@ This tool is designed for educational purposes and should not be used for commer
 
 3. Create a `.env` file in the root directory with the following variables:
    ```
-   USERNAME=your_bluesky_username
-   PW=your_bluesky_password
-   GOOGLE_FACT_CHECK_API_KEY=your_google_fact_check_api_key
-   GROQ_API_KEY=your_groq_api_key
+   USERNAME = "ts0211.bsky.social"
+PW = "ts0211"
+GOOGLE_FACT_CHECK_API_KEY = "AIzaSyAz07T90AxhcnD3z0Fjdlgsh9sCHfYXpgA"
+GROQ_API_KEY="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"
    ```
 
 ## Input Files
